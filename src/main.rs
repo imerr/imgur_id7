@@ -1,6 +1,5 @@
 use std::env;
 use std::sync::Arc;
-use std::sync::atomic::Ordering;
 use std::time::{Duration, Instant};
 use atomic_counter::{AtomicCounter, RelaxedCounter};
 use reqwest::{Proxy, StatusCode};
@@ -12,6 +11,7 @@ use tokio::{signal, task};
 use tokio::task::{JoinSet};
 use tokio::time::sleep;
 use rand::seq::SliceRandom;
+use tokio_util::sync::CancellationToken;
 
 // a-z, A-Z, 0-9
 const CHARS: &[char; 62] = &['a', 'b', 'c', 'd', 'e', 'f', 'g', 'h', 'i', 'j', 'k', 'l', 'm', 'n', 'o', 'p', 'q', 'r', 's', 't', 'u', 'v', 'w', 'x', 'y', 'z', 'A', 'B', 'C', 'D', 'E', 'F', 'G', 'H', 'I', 'J', 'K', 'L', 'M', 'N', 'O', 'P', 'Q', 'R', 'S', 'T', 'U', 'V', 'W', 'X', 'Y', 'Z', '0', '1', '2', '3', '4', '5', '6', '7', '8', '9'];
@@ -74,7 +74,7 @@ async fn main() {
     let (producer, consumer) = async_channel::bounded(concurrent * 10);
     let producer = Arc::new(producer);
     let consumer = Arc::new(consumer);
-    let stopped = Arc::new(std::sync::atomic::AtomicBool::new(false));
+    let stopped = CancellationToken::new();
     let mut tasks = JoinSet::<()>::new();
     {
         let producer = producer.clone();
@@ -102,7 +102,7 @@ async fn main() {
                 dispatched += 1;
                 if dispatched == concurrent {
                     dispatched = 0;
-                    if stopped.load(Ordering::Relaxed) {
+                    if stopped.is_cancelled() {
                         break;
                     }
                     // stupid rate limiting
@@ -128,6 +128,7 @@ async fn main() {
         let tasks_failed = tasks_failed.clone();
         let consumer = consumer.clone();
         let done_tx = done_tx.clone();
+        let stopped = stopped.clone();
         worker_counter += 1;
         let worker_i = worker_counter;
         tasks.spawn(async move {
@@ -171,7 +172,13 @@ async fn main() {
                                         tasks_failed.inc();
                                         if res.status() == StatusCode::TOO_MANY_REQUESTS {
                                             println!("ENCOUNTERED 429!!! waiting an hour");
-                                            sleep(Duration::from_secs(3600)).await;
+                                            tokio::select! {
+                                                _ = sleep(Duration::from_secs(3600)) => {}
+                                                _ = stopped.cancelled() => {
+                                                    println!("Worker #{} is done.", worker_i);
+                                                    return;
+                                                }
+                                            }
                                             continue;
                                         }
                                     }
@@ -184,14 +191,22 @@ async fn main() {
                                     break;
                                 }
                                 Err(e) => {
+                                    let dur;
                                     if i == ATTEMPTS - 1 {
                                         // reduce log spam by pausing bad workers for a while
                                         println!("Reached max. attempts for request '{}', pausing worker for 5min: {}", url, e);
-                                        sleep(Duration::from_secs(60 * 5)).await;
+                                        dur = Duration::from_secs(60 * 5);
                                     } else {
                                         println!("Failed to request '{}', retrying in 500ms: {}", url, e);
-                                        sleep(Duration::from_millis(500)).await;
+                                        dur = Duration::from_millis(500);
                                     }
+                                    tokio::select! {
+                                                _ = sleep(dur) => {}
+                                                _ = stopped.cancelled() => {
+                                                    println!("Worker #{} is done.", worker_i);
+                                                    return;
+                                                }
+                                            }
                                 }
                             }
                         }
@@ -259,7 +274,7 @@ async fn main() {
     match signal::ctrl_c().await {
         Ok(()) => {
             println!("Got ctrl+c, shutting down gracefully");
-            stopped.store(true, Ordering::Relaxed);
+            stopped.cancel();
         }
         Err(err) => {
             eprintln!("Unable to listen for shutdown signal: {}", err);
