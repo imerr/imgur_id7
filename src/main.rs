@@ -228,8 +228,8 @@ async fn main() {
             .create(true)
             .open(out_file.as_str()).await {
             Ok(mut filef) => {
+                let mut file = BufWriter::new(&mut filef);
                 loop {
-                    let mut file = BufWriter::new(&mut filef);
                     if let Some(found) = done_rx.recv().await {
                         match file.write_all(format!("https://i.imgur.com/{}.jpg", found).as_bytes()).await {
                             Ok(_) => {}
