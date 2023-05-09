@@ -18,6 +18,7 @@ Usage: imgur_id <output> <concurrent> <proxies>
 
 # Building
 Github Actions are set up to provide builds, but especially the linux ones might not run on your distro
+
 Building is easy though!
 
 1. [Install rust](https://www.rust-lang.org/tools/install)
