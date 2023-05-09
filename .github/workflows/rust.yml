@@ -1,5 +1,8 @@
 name: rust
-on: [push]
+on:
+  release:
+    types: [created]
+
 
 jobs:
   release:
