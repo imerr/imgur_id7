@@ -6,7 +6,7 @@ use atomic_counter::{AtomicCounter, RelaxedCounter};
 use reqwest::{Proxy, StatusCode};
 use reqwest::redirect::Policy;
 use tokio::fs::{File, OpenOptions};
-use tokio::io::{AsyncBufReadExt, AsyncWriteExt, BufReader};
+use tokio::io::{AsyncBufReadExt, AsyncWriteExt, BufReader, BufWriter};
 use tokio::sync::{mpsc};
 use tokio::{signal, task};
 use tokio::task::{JoinSet};
@@ -212,8 +212,9 @@ async fn main() {
             .append(true)
             .create(true)
             .open(out_file.as_str()).await {
-            Ok(mut file) => {
+            Ok(mut filef) => {
                 loop {
+                    let mut file = BufWriter::new(&mut filef);
                     if let Some(found) = done_rx.recv().await {
                         match file.write_all(format!("https://i.imgur.com/{}.jpg", found).as_bytes()).await {
                             Ok(_) => {}
@@ -230,7 +231,14 @@ async fn main() {
                             }
                         }
                     } else {
-                        match file.shutdown().await {
+                        match file.flush().await {
+                            Ok(_) => {}
+                            Err(e) => {
+                                println!("Failed to close results file after being done '{}': {}", out_file, e);
+                                return;
+                            }
+                        }
+                        match filef.shutdown().await {
                             Ok(_) => {}
                             Err(e) => {
                                 println!("Failed to close results file after being done '{}': {}", out_file, e);
