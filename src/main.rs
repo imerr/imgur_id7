@@ -132,6 +132,9 @@ async fn main() {
         worker_counter += 1;
         let worker_i = worker_counter;
         tasks.spawn(async move {
+            // slowly ramp up workers so we don't spam everything at once at the start
+            let r = worker_i as f32 / concurrent as f32 * 10000.0;
+            sleep(std::time::Duration::from_millis(r as u64)).await;
             let client = reqwest::Client::builder()
                 .user_agent("Mozilla/5.0 (Windows NT 10.0; Win64; x64; rv:109.0) Gecko/20100101 Firefox/112.0")
                 .proxy(proxy.clone())
