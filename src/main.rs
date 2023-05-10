@@ -173,10 +173,12 @@ async fn main() {
                                         }
                                     } else {
                                         tasks_failed.inc();
-                                        if res.status() == StatusCode::TOO_MANY_REQUESTS {
-                                            println!("ENCOUNTERED 429!!! waiting an hour");
+                                        let status = res.status();
+                                        if status == StatusCode::TOO_MANY_REQUESTS ||
+                                            status.is_server_error() {
+                                            println!("Failed to request '{}', got status {}, retrying in 3min", url, status.as_u16());
                                             tokio::select! {
-                                                _ = sleep(Duration::from_secs(3600)) => {}
+                                                _ = sleep(Duration::from_secs(180)) => {}
                                                 _ = stopped.cancelled() => {
                                                     println!("Worker #{} is done.", worker_i);
                                                     return;
