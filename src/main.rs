@@ -41,7 +41,16 @@ async fn main() {
                 match lines.next_line().await {
                     Ok(l) => {
                         if let Some(line) = l {
-                            let splits: Vec<&str> = line.as_str().split(":").collect();
+                            if line.is_empty() {
+                                continue;
+                            }
+                            let mut splits: Vec<&str> = line.as_str().split(":").collect();
+                            if splits.len() < 2 {
+                                println!("Proxy line \"{}\" was malformed", line);
+                            }
+                            while splits.len() < 4 {
+                                splits.push("");
+                            }
                             let purl = format!("http://{}:{}@{}:{}/", splits[2], splits[3], splits[0], splits[1]);
                             match Proxy::all(purl.as_str()) {
                                 Ok(proxy) => {
