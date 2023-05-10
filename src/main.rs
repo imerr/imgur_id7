@@ -172,7 +172,6 @@ async fn main() {
                                             }
                                         }
                                     } else {
-                                        tasks_failed.inc();
                                         let status = res.status();
                                         if status == StatusCode::TOO_MANY_REQUESTS ||
                                             status.is_server_error() {
@@ -186,6 +185,7 @@ async fn main() {
                                             }
                                             continue;
                                         }
+                                        tasks_failed.inc();
                                     }
                                     if worked % concurrent == 0 {
                                         let found = tasks_found.get();
