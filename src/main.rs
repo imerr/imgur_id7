@@ -80,7 +80,7 @@ async fn main() {
     //
     let out_file = Arc::new(args[1].clone());
     let concurrent: usize = args[2].parse().unwrap();
-    let (producer, consumer) = async_channel::bounded(concurrent * 10);
+    let (producer, consumer) = async_channel::bounded(concurrent);
     let producer = Arc::new(producer);
     let consumer = Arc::new(consumer);
     let stopped = CancellationToken::new();
