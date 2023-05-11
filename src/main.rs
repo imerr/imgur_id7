@@ -153,7 +153,6 @@ async fn main() {
                 .build();
             if client.is_err() {
                 println!("Failed to build http client: {}", client.unwrap_err());
-                sleep(Duration::from_millis(500)).await;
                 return;
             }
             let client = client.unwrap();
