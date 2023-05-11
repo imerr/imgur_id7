@@ -183,9 +183,15 @@ async fn main() {
                                         let status = res.status();
                                         if status == StatusCode::TOO_MANY_REQUESTS ||
                                             status.is_server_error() {
-                                            println!("Failed to request '{}', got status {}, retrying in 3min", url, status.as_u16());
+                                            let dur;
+                                            if status == StatusCode::TOO_MANY_REQUESTS {
+                                                dur = 90;
+                                            } else {
+                                                dur = 3;
+                                            }
+                                            println!("Failed to request '{}', got status {}, retrying in {}min", url, status.as_u16(), dur);
                                             tokio::select! {
-                                                _ = sleep(Duration::from_secs(180)) => {}
+                                                _ = sleep(Duration::from_secs(dur * 60)) => {}
                                                 _ = stopped.cancelled() => {
                                                     println!("Worker #{} is done.", worker_i);
                                                     return;
