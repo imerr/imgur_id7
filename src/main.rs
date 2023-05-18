@@ -1,4 +1,5 @@
 use std::env;
+use std::process::exit;
 use std::sync::Arc;
 use std::time::{Duration, Instant};
 use atomic_counter::{AtomicCounter, RelaxedCounter};
@@ -17,70 +18,85 @@ use tokio_util::sync::CancellationToken;
 const CHARS: &[char; 62] = &['a', 'b', 'c', 'd', 'e', 'f', 'g', 'h', 'i', 'j', 'k', 'l', 'm', 'n', 'o', 'p', 'q', 'r', 's', 't', 'u', 'v', 'w', 'x', 'y', 'z', 'A', 'B', 'C', 'D', 'E', 'F', 'G', 'H', 'I', 'J', 'K', 'L', 'M', 'N', 'O', 'P', 'Q', 'R', 'S', 'T', 'U', 'V', 'W', 'X', 'Y', 'Z', '0', '1', '2', '3', '4', '5', '6', '7', '8', '9'];
 const ID_LEN: usize = 7; // modern id length, AT already has a list of all working 5char ids
 
+const NO_PROXY_CONC_LIMIT: usize = 10;
+
 #[tokio::main]
 async fn main() {
     let args: Vec<String> = env::args().collect();
-    if args.len() != 4 {
-        println!("Usage: imgur_id <output> <concurrent> <proxies>");
+    if args.len() != 4 && args.len() != 3 {
+        println!("Usage: imgur_id <output> <concurrent> [<proxies=--no-proxies>]");
         println!("\toutput: Path to the output file, will be appended to");
         println!("\tconcurrent: How many requests to queue per second max. (actual rate will be slightly lower)");
-        println!("\tproxies: Proxy list file in the format of 'PROXY_HOST:PROXY_PORT:PROXY_USER:PROXY_PASSWORD' with one entry per line");
+        println!("\tproxies: Proxy list file or --no-proxies (default) to not use proxies");
+        println!("\t         Proxy list file has the format of 'PROXY_HOST:PROXY_PORT:PROXY_USER:PROXY_PASSWORD' with one entry per line");
         println!("\t         So for example 'proxy.example.com:1234:username:password123'");
         println!("\t         For each entry, one worker will be spawned.");
         std::process::exit(1);
     }
     let mut proxies = vec![];
     // read proxies:
-    match File::open(args[3].as_str()).await {
-        Ok(file) => {
-            let reader = BufReader::new(file);
+    let proxy_file_name = if args.len() == 3 { "--no-proxies" } else { args[3].as_str() };
+    let using_proxies = proxy_file_name != "--no-proxies";
+    let concurrent: usize = args[2].parse().unwrap();
+    if !using_proxies {
+        if concurrent > NO_PROXY_CONC_LIMIT {
+            println!("Concurrency seems to be set too high for a single ip. (max. {NO_PROXY_CONC_LIMIT}), refusing to start");
+            exit(1);
+        }
+        for _ in 0..concurrent {
+            proxies.push(Proxy::custom(|_| -> Option<&'static str> { None }));
+        }
+    } else {
+        match File::open(args[3].as_str()).await {
+            Ok(file) => {
+                let reader = BufReader::new(file);
 
-            let mut lines = reader.lines();
+                let mut lines = reader.lines();
 
-            loop {
-                match lines.next_line().await {
-                    Ok(l) => {
-                        if let Some(line) = l {
-                            if line.is_empty() {
-                                continue;
-                            }
-                            let mut splits: Vec<&str> = line.as_str().split(":").collect();
-                            if splits.len() < 2 {
-                                println!("Proxy line \"{}\" was malformed", line);
-                            }
-                            while splits.len() < 4 {
-                                splits.push("");
-                            }
-                            let purl = format!("http://{}:{}@{}:{}/", splits[2], splits[3], splits[0], splits[1]);
-                            match Proxy::all(purl.as_str()) {
-                                Ok(proxy) => {
-                                    proxies.push(proxy)
+                loop {
+                    match lines.next_line().await {
+                        Ok(l) => {
+                            if let Some(line) = l {
+                                if line.is_empty() {
+                                    continue;
                                 }
-                                Err(e) => {
-                                    println!("Bad proxy line '{}' -> '{}': {}", line, purl, e);
-                                    std::process::exit(1);
+                                let mut splits: Vec<&str> = line.as_str().split(":").collect();
+                                if splits.len() < 2 {
+                                    println!("Proxy line \"{}\" was malformed", line);
                                 }
+                                while splits.len() < 4 {
+                                    splits.push("");
+                                }
+                                let purl = format!("http://{}:{}@{}:{}/", splits[2], splits[3], splits[0], splits[1]);
+                                match Proxy::all(purl.as_str()) {
+                                    Ok(proxy) => {
+                                        proxies.push(proxy)
+                                    }
+                                    Err(e) => {
+                                        println!("Bad proxy line '{}' -> '{}': {}", line, purl, e);
+                                        std::process::exit(1);
+                                    }
+                                }
+                            } else {
+                                break;
                             }
-                        } else {
-                            break;
                         }
-                    }
-                    Err(e) => {
-                        println!("Failed to read line from proxy file '{}': {}", args[4], e);
-                        std::process::exit(1);
+                        Err(e) => {
+                            println!("Failed to read line from proxy file '{}': {}", args[4], e);
+                            std::process::exit(1);
+                        }
                     }
                 }
             }
-        }
-        Err(e) => {
-            println!("Failed to open file '{}': {}", args[4], e);
-            std::process::exit(1);
+            Err(e) => {
+                println!("Failed to open file '{}': {}", args[4], e);
+                std::process::exit(1);
+            }
         }
     }
     //
     let out_file = Arc::new(args[1].clone());
-    let concurrent: usize = args[2].parse().unwrap();
-    let (producer, consumer) = async_channel::bounded(concurrent);
+    let (producer, consumer) = async_channel::bounded(concurrent + 10);
     let producer = Arc::new(producer);
     let consumer = Arc::new(consumer);
     let stopped = CancellationToken::new();
