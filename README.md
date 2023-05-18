@@ -8,12 +8,13 @@ Generates ids at random since there's too many ids to reasonably scan in order a
 
 # Usage
 ```
-Usage: imgur_id <output> <concurrent> <proxies>
-        output: Path to the output file, will be appended to
-        concurrent: How many requests to queue per second max. (actual rate will be slightly lower)
-        proxies: Proxy list file in the format of 'PROXY_HOST:PROXY_PORT:PROXY_USER:PROXY_PASSWORD' with one entry per line
-                 So for example 'proxy.example.com:1234:username:password123'
-                 For each entry, one worker will be spawned.
+Usage: imgur_id <output> <concurrent> [<proxies=--no-proxies>]
+	output: Path to the output file, will be appended to
+	concurrent: How many requests to queue per second max. (actual rate will be slightly lower)
+	proxies: Proxy list file or --no-proxies (default) to not use proxies
+	         Proxy list file has the format of 'PROXY_HOST:PROXY_PORT:PROXY_USER:PROXY_PASSWORD' with one entry per line
+	         So for example 'proxy.example.com:1234:username:password123'
+	         For each entry, one worker will be spawned.
 ```
 
 # Building
