@@ -1,6 +1,6 @@
 [package]
 name = "imgur_id7"
-version = "0.1.8"
+version = "0.1.9"
 edition = "2021"
 description = "Fast tool to scan for valid 7-long imgur ids for the ArchiveTeam imgur efforts (not affiliated or endorsed).\nResults are automatically reported to nicolas17's browser based tool: https://data.nicolas17.xyz/imgur-bruteforce/ unless disabled with --offline"
 

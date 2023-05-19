@@ -225,7 +225,7 @@ async fn main() {
         }
     } else {
         if args.concurrent > NO_PROXY_CONC_LIMIT && !args.concurrent_unsafe {
-            println!("Concurrency seems to be set too high for a single ip. (max. {NO_PROXY_CONC_LIMIT}), refusing to start.\nIf you're really sure you want this, prefix the number with ! and I'll do it.");
+            println!("Concurrency seems to be set too high for a single ip. (max. {NO_PROXY_CONC_LIMIT}), refusing to start.\nIf you're really sure you want this, use --concurrent-unsafe and I'll do it.");
             exit(1);
         }
         for _ in 0..args.concurrent {
