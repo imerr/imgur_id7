@@ -8,7 +8,7 @@ Generates ids at random since there's too many ids to reasonably scan in order a
 
 # Usage
 ```
-Usage: imgur_id7.exe [OPTIONS]
+Usage: imgur_id7 [OPTIONS]
 
 Options:
   -r, --results-file <RESULTS_FILE>
