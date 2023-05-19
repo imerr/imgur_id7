@@ -2,19 +2,35 @@ imgur_id7
 ====
 Fast tool to scan for valid 7-long imgur ids for the [ArchiveTeam imgur efforts](https://wiki.archiveteam.org/index.php/Imgur) (not affiliated or endorsed)
 
-Uses supplied http proxies to scan many ids in parallel since imgur does have rate limiting.
+Optionally uses supplied http proxies to scan many ids in parallel since imgur does have rate limiting.
 
 Generates ids at random since there's too many ids to reasonably scan in order anyways.
 
 # Usage
-```
-Usage: imgur_id <output> <concurrent> [<proxies=--no-proxies>]
-	output: Path to the output file, will be appended to
-	concurrent: How many requests to queue per second max. (actual rate will be slightly lower)
-	proxies: Proxy list file or --no-proxies (default) to not use proxies
-	         Proxy list file has the format of 'PROXY_HOST:PROXY_PORT:PROXY_USER:PROXY_PASSWORD' with one entry per line
-	         So for example 'proxy.example.com:1234:username:password123'
-	         For each entry, one worker will be spawned.
+```Usage: imgur_id7.exe [OPTIONS]
+
+Options:
+  -r, --results-file <RESULTS_FILE>
+          Where to save found results
+  -p, --proxy-file <PROXY_FILE>
+          This specifies an optional list of http proxies to use
+          Proxy list file has the format of 'PROXY_HOST:PROXY_PORT:PROXY_USER:PROXY_PASSWORD' with one entry per line
+          So for example 'proxy.example.com:1234:username:password123'
+          For each entry, one worker will be spawned.
+  -o, --offline
+          If used, results will not be reported automatically
+      --online-tracker-url <ONLINE_TRACKER_URL>
+          Url to an alternative result tracker, results are POST'ed to the url with a json body
+          in the format of {"images_found": ["AsDfgHi", "7654321", "1234567", ...]}
+          Defaults to nicolas17's tracker
+  -c, --concurrent <CONCURRENT>
+          How many requests to queue per second (actual rate will be slightly lower) [default: 3]
+  -c, --concurrent-unsafe
+          Bypass concurrency sanity check
+  -h, --help
+          Print help
+  -V, --version
+          Print version
 ```
 
 # Building

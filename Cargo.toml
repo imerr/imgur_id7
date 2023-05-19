@@ -1,14 +1,18 @@
 [package]
 name = "imgur_id7"
-version = "0.1.6"
+version = "0.1.7"
 edition = "2021"
+description = "Fast tool to scan for valid 7-long imgur ids for the ArchiveTeam imgur efforts (not affiliated or endorsed).\nResults are automatically reported to nicolas17's browser based tool: https://data.nicolas17.xyz/imgur-bruteforce/ unless disabled with --offline"
 
 # See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
 
 [dependencies]
-tokio = {version = "1.28.0", features = ["full", "rt-multi-thread"]}
+tokio = { version = "1.28.0", features = ["full", "rt-multi-thread"] }
 tokio-util = "0.7.8"
-reqwest = "0.11.17"
+reqwest = { version = "0.11.17", features = ["json"] }
 async-channel = "1.8.0"
+serde = { version = "1.0.163", features = ["derive"] }
+serde_json = "1.0.96"
 rand = "0.8.5"
 atomic-counter = "1.0.1"
+clap = { version = "4.2.7", features = ["derive", "cargo"] }

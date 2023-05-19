@@ -1,9 +1,9 @@
-use std::env;
 use std::process::exit;
 use std::sync::Arc;
 use std::time::{Duration, Instant};
 use atomic_counter::{AtomicCounter, RelaxedCounter};
-use reqwest::{Proxy, StatusCode};
+use clap::Parser;
+use reqwest::{Client, ClientBuilder, Proxy, StatusCode};
 use reqwest::redirect::Policy;
 use tokio::fs::{File, OpenOptions};
 use tokio::io::{AsyncBufReadExt, AsyncWriteExt, BufReader, BufWriter};
@@ -13,6 +13,8 @@ use tokio::task::{JoinSet};
 use tokio::time::sleep;
 use rand::seq::SliceRandom;
 use tokio_util::sync::CancellationToken;
+use serde::Serialize;
+use clap::crate_version;
 
 // a-z, A-Z, 0-9
 const CHARS: &[char; 62] = &['a', 'b', 'c', 'd', 'e', 'f', 'g', 'h', 'i', 'j', 'k', 'l', 'm', 'n', 'o', 'p', 'q', 'r', 's', 't', 'u', 'v', 'w', 'x', 'y', 'z', 'A', 'B', 'C', 'D', 'E', 'F', 'G', 'H', 'I', 'J', 'K', 'L', 'M', 'N', 'O', 'P', 'Q', 'R', 'S', 'T', 'U', 'V', 'W', 'X', 'Y', 'Z', '0', '1', '2', '3', '4', '5', '6', '7', '8', '9'];
@@ -20,35 +22,162 @@ const ID_LEN: usize = 7; // modern id length, AT already has a list of all worki
 
 const NO_PROXY_CONC_LIMIT: usize = 10;
 
+/// Simple program to greet a person
+#[derive(Parser, Debug)]
+#[command(author, version, about, long_about = None)]
+struct Args {
+    /// Where to save found results
+    #[arg(short, long)]
+    pub results_file: Option<String>,
+    /// This specifies an optional list of http proxies to use
+    /// Proxy list file has the format of 'PROXY_HOST:PROXY_PORT:PROXY_USER:PROXY_PASSWORD' with one entry per line
+    /// So for example 'proxy.example.com:1234:username:password123'
+    /// For each entry, one worker will be spawned.
+    #[arg(short, long, verbatim_doc_comment)]
+    pub proxy_file: Option<String>,
+
+    /// If used, results will not be reported automatically
+    #[arg(short, long, default_value_t = false)]
+    pub offline: bool,
+
+    /// Url to an alternative result tracker, results are POST'ed to the url with a json body
+    /// in the format of {"images_found": ["AsDfgHi", "7654321", "1234567", ...]}
+    /// Defaults to nicolas17's tracker
+    #[arg(long, verbatim_doc_comment)]
+    pub online_tracker_url: Option<String>,
+
+    ///  How many requests to queue per second (actual rate will be slightly lower)
+    #[arg(short, long, default_value_t = 3)]
+    pub concurrent: usize,
+    /// Bypass concurrency sanity check
+    #[arg(short, long, default_value_t = false)]
+    pub concurrent_unsafe: bool,
+}
+
+struct ResultsFile {
+    writer: BufWriter<File>,
+}
+
+impl ResultsFile {
+    pub async fn open(path: &str) -> ResultsFile {
+        match OpenOptions::new()
+            .write(true)
+            .append(true)
+            .create(true)
+            .open(path).await {
+            Ok(filef) => {
+                return ResultsFile {
+                    writer: BufWriter::new(filef)
+                };
+            }
+            Err(e) => {
+                println!("Failed to open results file '{}': {}", path, e);
+                exit(1)
+            }
+        }
+    }
+
+    pub async fn write(&mut self, found: &str) -> bool {
+        match self.writer.write_all(format!("https://i.imgur.com/{}.jpg", found).as_bytes()).await {
+            Ok(_) => {}
+            Err(e) => {
+                println!("Failed to write result to results file: {}", e);
+                return false;
+            }
+        }
+        match self.writer.write_all(b"\n").await {
+            Ok(_) => {}
+            Err(e) => {
+                println!("Failed to write result to results file: {}", e);
+                return false;
+            }
+        }
+        return true;
+    }
+
+    pub async fn close(mut self) {
+        match self.writer.flush().await {
+            Ok(_) => {}
+            Err(e) => {
+                println!("Failed to close results file after being done: {}", e);
+                return;
+            }
+        }
+        match self.writer.into_inner().shutdown().await {
+            Ok(_) => {}
+            Err(e) => {
+                println!("Failed to close results file after being done: {}", e);
+                return;
+            }
+        }
+    }
+}
+#[derive(Serialize, Debug)]
+struct ResultsTrackerBuffer {
+    pub images_found: Vec<String>,
+}
+struct ResultsTracker {
+    client: Client,
+    url: String,
+    buffer: ResultsTrackerBuffer,
+    last_send: Instant,
+}
+
+const TRACKER_SEND_INTERVAL: Duration = Duration::from_secs(5);
+const TRACKER_SEND_LIMIT: usize = 100;
+
+impl ResultsTracker {
+    pub fn new(url: Option<String>) -> ResultsTracker {
+        ResultsTracker {
+            client: ClientBuilder::new().user_agent(format!("imgur_id7/{}", crate_version!())).build().unwrap(),
+            url: url.unwrap_or(String::from("https://data.nicolas17.xyz/imgur-bruteforce/report")),
+            buffer: ResultsTrackerBuffer{images_found: vec![]},
+            last_send: Instant::now()
+        }
+    }
+
+    pub async fn report(&mut self, id: String) {
+        self.buffer.images_found.push(id);
+        if self.last_send.elapsed() > TRACKER_SEND_INTERVAL ||
+            self.buffer.images_found.len() > TRACKER_SEND_LIMIT {
+            self.send().await;
+        }
+    }
+
+    async fn send(&mut self) {
+        loop {
+            match self.client.post(&self.url).json(&self.buffer).send().await {
+                Ok(res) => {
+                    if !res.status().is_success(){
+                        println!("Failed to submit results to the tracker, got non-2oo status {}. Retrying in 2s. Response: {}\n", res.status().as_u16(), res.text().await.unwrap_or(String::from("n/a")));
+                    } else {
+                        println!("Reported {} to the tracker. Thanks!", self.buffer.images_found.len());
+                        break;
+                    }
+                }
+                Err(e) => {
+                    println!("Failed to submit results to the tracker: {}. Retrying in 2s", e);
+                }
+            }
+            sleep(Duration::from_secs(2)).await;
+        }
+        self.last_send = Instant::now();
+        self.buffer.images_found.clear();
+    }
+
+    pub async fn close(mut self) {
+        if self.buffer.images_found.len() > 0 {
+            self.send().await;
+        }
+    }
+}
 #[tokio::main]
 async fn main() {
-    let args: Vec<String> = env::args().collect();
-    if args.len() != 4 && args.len() != 3 {
-        println!("Usage: imgur_id <output> <concurrent> [<proxies=--no-proxies>]");
-        println!("\toutput: Path to the output file, will be appended to");
-        println!("\tconcurrent: How many requests to queue per second max. (actual rate will be slightly lower)");
-        println!("\tproxies: Proxy list file or --no-proxies (default) to not use proxies");
-        println!("\t         Proxy list file has the format of 'PROXY_HOST:PROXY_PORT:PROXY_USER:PROXY_PASSWORD' with one entry per line");
-        println!("\t         So for example 'proxy.example.com:1234:username:password123'");
-        println!("\t         For each entry, one worker will be spawned.");
-        std::process::exit(1);
-    }
-    let mut proxies = vec![];
-    // read proxies:
-    let proxy_file_name = if args.len() == 3 { "--no-proxies" } else { args[3].as_str() };
-    let using_proxies = proxy_file_name != "--no-proxies";
+    let args = Arc::new(Args::parse());
 
-    let concurrent: usize = args[2].as_str().trim_start_matches("!").parse().unwrap();
-    if !using_proxies {
-        if !args[2].starts_with("!") && concurrent > NO_PROXY_CONC_LIMIT {
-            println!("Concurrency seems to be set too high for a single ip. (max. {NO_PROXY_CONC_LIMIT}), refusing to start.\nIf you're really sure you want this, prefix the number with ! and I'll do it.");
-            exit(1);
-        }
-        for _ in 0..concurrent {
-            proxies.push(Proxy::custom(|_| -> Option<&'static str> { None }));
-        }
-    } else {
-        match File::open(args[3].as_str()).await {
+    let mut proxies = vec![];
+    if let Some(proxy_list) = &args.proxy_file {
+        match File::open(proxy_list.as_str()).await {
             Ok(file) => {
                 let reader = BufReader::new(file);
 
@@ -83,21 +212,28 @@ async fn main() {
                             }
                         }
                         Err(e) => {
-                            println!("Failed to read line from proxy file '{}': {}", args[4], e);
+                            println!("Failed to read line from proxy file '{}': {}", proxy_list, e);
                             std::process::exit(1);
                         }
                     }
                 }
             }
             Err(e) => {
-                println!("Failed to open file '{}': {}", args[4], e);
+                println!("Failed to open file '{}': {}", proxy_list, e);
                 std::process::exit(1);
             }
         }
+    } else {
+        if args.concurrent > NO_PROXY_CONC_LIMIT && !args.concurrent_unsafe {
+            println!("Concurrency seems to be set too high for a single ip. (max. {NO_PROXY_CONC_LIMIT}), refusing to start.\nIf you're really sure you want this, prefix the number with ! and I'll do it.");
+            exit(1);
+        }
+        for _ in 0..args.concurrent {
+            proxies.push(Proxy::custom(|_| -> Option<&'static str> { None }));
+        }
     }
     //
-    let out_file = Arc::new(args[1].clone());
-    let (producer, consumer) = async_channel::bounded(concurrent + 10);
+    let (producer, consumer) = async_channel::bounded(args.concurrent + 10);
     let producer = Arc::new(producer);
     let consumer = Arc::new(consumer);
     let stopped = CancellationToken::new();
@@ -105,6 +241,7 @@ async fn main() {
     {
         let producer = producer.clone();
         let stopped = stopped.clone();
+        let args = args.clone();
         tasks.spawn(async move {
             let mut dispatched = 0usize;
             loop {
@@ -126,7 +263,7 @@ async fn main() {
                     }
                 };
                 dispatched += 1;
-                if dispatched == concurrent {
+                if dispatched == args.concurrent {
                     dispatched = 0;
                     if stopped.is_cancelled() {
                         break;
@@ -141,7 +278,7 @@ async fn main() {
             producer.close();
         });
     }
-    let (done_tx, mut done_rx) = mpsc::channel(concurrent * 10);
+    let (done_tx, mut done_rx) = mpsc::channel(args.concurrent * 10);
     let done_tx = Arc::new(done_tx);
     let tasks_worked = Arc::new(RelaxedCounter::new(0));
     let tasks_found = Arc::new(RelaxedCounter::new(0));
@@ -155,11 +292,12 @@ async fn main() {
         let consumer = consumer.clone();
         let done_tx = done_tx.clone();
         let stopped = stopped.clone();
+        let args = args.clone();
         worker_counter += 1;
         let worker_i = worker_counter;
         tasks.spawn(async move {
             // slowly ramp up workers so we don't spam everything at once at the start
-            let r = worker_i as f32 / concurrent as f32 * 10000.0;
+            let r = worker_i as f32 / args.concurrent as f32 * 10000.0;
             sleep(std::time::Duration::from_millis(r as u64)).await;
             let client = reqwest::Client::builder()
                 .user_agent("Mozilla/5.0 (Windows NT 10.0; Win64; x64; rv:109.0) Gecko/20100101 Firefox/112.0")
@@ -218,11 +356,11 @@ async fn main() {
                                         }
                                         tasks_failed.inc();
                                     }
-                                    if worked % concurrent == 0 {
+                                    if worked % args.concurrent == 0 {
                                         let found = tasks_found.get();
                                         let failed = tasks_failed.get();
                                         let elapsed = start.elapsed();
-                                        println!("Worked {}, found {}, failed {}, ~{:.1}% exist, {:.1} req/s", worked, found, failed, found as f32 / worked as f32 * 100.0, worked as f32 / elapsed.as_secs_f32());
+                                        println!("Worked {}, found {}, failed {}, ~{:.2}% exist, {:.1} req/s", worked, found, failed, found as f32 / worked as f32 * 100.0, worked as f32 / elapsed.as_secs_f32());
                                     }
                                     break;
                                 }
@@ -258,51 +396,38 @@ async fn main() {
     }
     drop(done_tx);
     let result_task = task::spawn(async move {
-        match OpenOptions::new()
-            .write(true)
-            .append(true)
-            .create(true)
-            .open(out_file.as_str()).await {
-            Ok(mut filef) => {
-                let mut file = BufWriter::new(&mut filef);
-                loop {
-                    if let Some(found) = done_rx.recv().await {
-                        match file.write_all(format!("https://i.imgur.com/{}.jpg", found).as_bytes()).await {
-                            Ok(_) => {}
-                            Err(e) => {
-                                println!("Failed to write result to results file '{}': {}", out_file, e);
-                                return;
-                            }
-                        }
-                        match file.write_all(b"\n").await {
-                            Ok(_) => {}
-                            Err(e) => {
-                                println!("Failed to write result to results file '{}': {}", out_file, e);
-                                return;
-                            }
-                        }
-                    } else {
-                        match file.flush().await {
-                            Ok(_) => {}
-                            Err(e) => {
-                                println!("Failed to close results file after being done '{}': {}", out_file, e);
-                                return;
-                            }
-                        }
-                        match filef.shutdown().await {
-                            Ok(_) => {}
-                            Err(e) => {
-                                println!("Failed to close results file after being done '{}': {}", out_file, e);
-                                return;
-                            }
-                        }
-                        println!("Finished writing results");
-                        return; // channel closed
+        let mut result_file = None;
+        if let Some(out_file) = &args.results_file {
+            result_file = Some(ResultsFile::open(out_file.as_str()).await);
+        }
+        let mut result_tracker = None;
+        if !args.offline {
+            result_tracker = Some(ResultsTracker::new(args.online_tracker_url.clone()));
+        }
+
+        if result_tracker.is_none() && result_file.is_none() {
+            println!("No result output mechanism selected.\nEither writing to file or sending to tracker need to be enabled!");
+            exit(1);
+        }
+        loop {
+            if let Some(found) = done_rx.recv().await {
+                if let Some(file) = result_file.as_mut() {
+                    if !file.write(found.as_str()).await {
+                        return;
                     }
                 }
-            }
-            Err(e) => {
-                println!("Failed to open results file '{}': {}", out_file, e);
+                if let Some(tracker) = result_tracker.as_mut() {
+                    tracker.report(found).await;
+                }
+            } else {
+                if let Some(file) = result_file {
+                    file.close().await;
+                }
+                if let Some(tracker) = result_tracker {
+                    tracker.close().await;
+                }
+                println!("Finished writing results");
+                return; // channel closed
             }
         }
     });
@@ -336,6 +461,6 @@ async fn main() {
     let worked = tasks_worked.get();
     let found = tasks_found.get();
     let failed = tasks_failed.get();
-    println!("Worked {:07}, found {:07}, failed {:07}, ~{:.1}% exist, {:.1} req/s", worked, found, failed, found as f32 / worked as f32 * 100.0, worked as f32 / elapsed.as_secs_f32());
+    println!("Worked {:07}, found {:07}, failed {:07}, ~{:.2}% exist, {:.1} req/s", worked, found, failed, found as f32 / worked as f32 * 100.0, worked as f32 / elapsed.as_secs_f32());
     println!("All done.");
 }
