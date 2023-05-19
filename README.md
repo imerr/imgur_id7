@@ -26,7 +26,7 @@ Options:
           Defaults to nicolas17's tracker
   -c, --concurrent <CONCURRENT>
           How many requests to queue per second (actual rate will be slightly lower) [default: 3]
-  -c, --concurrent-unsafe
+      --concurrent-unsafe
           Bypass concurrency sanity check
   -h, --help
           Print help

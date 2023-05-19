@@ -50,7 +50,7 @@ struct Args {
     #[arg(short, long, default_value_t = 3)]
     pub concurrent: usize,
     /// Bypass concurrency sanity check
-    #[arg(short, long, default_value_t = false)]
+    #[arg(long, default_value_t = false)]
     pub concurrent_unsafe: bool,
 }
 
