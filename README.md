@@ -7,7 +7,8 @@ Optionally uses supplied http proxies to scan many ids in parallel since imgur d
 Generates ids at random since there's too many ids to reasonably scan in order anyways.
 
 # Usage
-```Usage: imgur_id7.exe [OPTIONS]
+```
+Usage: imgur_id7.exe [OPTIONS]
 
 Options:
   -r, --results-file <RESULTS_FILE>
