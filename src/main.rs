@@ -112,10 +112,12 @@ impl ResultsFile {
         }
     }
 }
+
 #[derive(Serialize, Debug)]
 struct ResultsTrackerBuffer {
     pub images_found: Vec<String>,
 }
+
 struct ResultsTracker {
     client: Client,
     url: String,
@@ -131,8 +133,8 @@ impl ResultsTracker {
         ResultsTracker {
             client: ClientBuilder::new().user_agent(format!("imgur_id7/{}", crate_version!())).build().unwrap(),
             url: url.unwrap_or(String::from("https://data.nicolas17.xyz/imgur-bruteforce/report")),
-            buffer: ResultsTrackerBuffer{images_found: vec![]},
-            last_send: Instant::now()
+            buffer: ResultsTrackerBuffer { images_found: vec![] },
+            last_send: Instant::now(),
         }
     }
 
@@ -148,7 +150,7 @@ impl ResultsTracker {
         loop {
             match self.client.post(&self.url).json(&self.buffer).send().await {
                 Ok(res) => {
-                    if !res.status().is_success(){
+                    if !res.status().is_success() {
                         println!("Failed to submit results to the tracker, got non-2oo status {}. Retrying in 2s. Response: {}\n", res.status().as_u16(), res.text().await.unwrap_or(String::from("n/a")));
                     } else {
                         println!("Reported {} to the tracker. Thanks!", self.buffer.images_found.len());
@@ -171,6 +173,7 @@ impl ResultsTracker {
         }
     }
 }
+
 #[tokio::main]
 async fn main() {
     let args = Arc::new(Args::parse());
@@ -326,12 +329,27 @@ async fn main() {
                                     //println!("{}: {}", url, res.status());
                                     let worked = tasks_worked.inc() + 1;
                                     if res.status().is_success() {
-                                        tasks_found.inc();
-                                        match done_tx.send(task).await {
-                                            Ok(_) => {}
-                                            Err(e) => {
-                                                println!("Failed to send result {}", e);
-                                                return;
+                                        // imgur now returns 200 for removed images too, but with the "removed.png" as a body
+                                        // thankfully it has a consistent length & etag
+                                        let mut bad = false;
+                                        if let Some(length) = res.headers().get("content-length") {
+                                            if length == "503" {
+                                                if let Some(etag) = res.headers().get("etag") {
+                                                    if etag == "\"d835884373f4d6c8f24742ceabe74946\"" {
+                                                        tasks_failed.inc();
+                                                        bad = true;
+                                                    }
+                                                }
+                                            }
+                                        }
+                                        if !bad {
+                                            tasks_found.inc();
+                                            match done_tx.send(task).await {
+                                                Ok(_) => {}
+                                                Err(e) => {
+                                                    println!("Failed to send result {}", e);
+                                                    return;
+                                                }
                                             }
                                         }
                                     } else {
