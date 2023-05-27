@@ -20,9 +20,9 @@ use clap::crate_version;
 const CHARS: &[char; 62] = &['a', 'b', 'c', 'd', 'e', 'f', 'g', 'h', 'i', 'j', 'k', 'l', 'm', 'n', 'o', 'p', 'q', 'r', 's', 't', 'u', 'v', 'w', 'x', 'y', 'z', 'A', 'B', 'C', 'D', 'E', 'F', 'G', 'H', 'I', 'J', 'K', 'L', 'M', 'N', 'O', 'P', 'Q', 'R', 'S', 'T', 'U', 'V', 'W', 'X', 'Y', 'Z', '0', '1', '2', '3', '4', '5', '6', '7', '8', '9'];
 const ID_LEN: usize = 7; // modern id length, AT already has a list of all working 5char ids
 
-const NO_PROXY_CONC_LIMIT: usize = 10;
+// New safe limit is 40
+const NO_PROXY_CONC_LIMIT: usize = 40;
 
-/// Simple program to greet a person
 #[derive(Parser, Debug)]
 #[command(author, version, about, long_about = None)]
 struct Args {
@@ -47,7 +47,7 @@ struct Args {
     pub online_tracker_url: Option<String>,
 
     ///  How many requests to queue per second (actual rate will be slightly lower)
-    #[arg(short, long, default_value_t = 3)]
+    #[arg(short, long, default_value_t = 10)]
     pub concurrent: usize,
     /// Bypass concurrency sanity check
     #[arg(long, default_value_t = false)]
@@ -125,7 +125,7 @@ struct ResultsTracker {
     last_send: Instant,
 }
 
-const TRACKER_SEND_INTERVAL: Duration = Duration::from_secs(5);
+const TRACKER_SEND_INTERVAL: Duration = Duration::from_secs(30);
 const TRACKER_SEND_LIMIT: usize = 100;
 
 impl ResultsTracker {
@@ -153,7 +153,7 @@ impl ResultsTracker {
                     if !res.status().is_success() {
                         println!("Failed to submit results to the tracker, got non-2oo status {}. Retrying in 2s. Response: {}\n", res.status().as_u16(), res.text().await.unwrap_or(String::from("n/a")));
                     } else {
-                        println!("Reported {} to the tracker. Thanks!", self.buffer.images_found.len());
+                        println!("Reported {} to the tracker.", self.buffer.images_found.len());
                         break;
                     }
                 }
@@ -303,7 +303,7 @@ async fn main() {
             let r = worker_i as f32 / args.concurrent as f32 * 10000.0;
             sleep(std::time::Duration::from_millis(r as u64)).await;
             let client = reqwest::Client::builder()
-                .user_agent("Mozilla/5.0 (Windows NT 10.0; Win64; x64; rv:109.0) Gecko/20100101 Firefox/112.0")
+                .user_agent("Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/113.0.0.0 Safari/537.36")
                 .proxy(proxy.clone())
                 .connect_timeout(Duration::from_secs(10))
                 .timeout(Duration::from_secs(10))
@@ -378,7 +378,7 @@ async fn main() {
                                         let found = tasks_found.get();
                                         let failed = tasks_failed.get();
                                         let elapsed = start.elapsed();
-                                        println!("Worked {}, found {}, failed {}, ~{:.2}% exist, {:.1} req/s", worked, found, failed, found as f32 / worked as f32 * 100.0, worked as f32 / elapsed.as_secs_f32());
+                                        println!("{} req, {} found, {} failed, ~{:.2}% exist, {:.1} rps", worked, found, failed, found as f32 / worked as f32 * 100.0, worked as f32 / elapsed.as_secs_f32());
                                     }
                                     break;
                                 }
@@ -479,6 +479,6 @@ async fn main() {
     let worked = tasks_worked.get();
     let found = tasks_found.get();
     let failed = tasks_failed.get();
-    println!("Worked {:07}, found {:07}, failed {:07}, ~{:.2}% exist, {:.1} req/s", worked, found, failed, found as f32 / worked as f32 * 100.0, worked as f32 / elapsed.as_secs_f32());
+    println!("{} req, {} found, {} failed, ~{:.2}% exist, {:.1} rps", worked, found, failed, found as f32 / worked as f32 * 100.0, worked as f32 / elapsed.as_secs_f32());
     println!("All done.");
 }

@@ -447,7 +447,7 @@ dependencies = [
 
 [[package]]
 name = "imgur_id7"
-version = "0.1.10"
+version = "0.1.10-monika"
 dependencies = [
  "async-channel",
  "atomic-counter",
