@@ -27,30 +27,30 @@ const NO_PROXY_CONC_LIMIT: usize = 40;
 #[command(author, version, about, long_about = None)]
 struct Args {
     /// Where to save found results
-    #[arg(short, long)]
+    #[arg(short, long, env = "RESULT_FILE")]
     pub results_file: Option<String>,
     /// This specifies an optional list of http proxies to use
     /// Proxy list file has the format of 'PROXY_HOST:PROXY_PORT:PROXY_USER:PROXY_PASSWORD' with one entry per line
     /// So for example 'proxy.example.com:1234:username:password123'
     /// For each entry, one worker will be spawned.
-    #[arg(short, long, verbatim_doc_comment)]
+    #[arg(short, long, verbatim_doc_comment, env = "PROXY_FILE")]
     pub proxy_file: Option<String>,
 
     /// If used, results will not be reported automatically
-    #[arg(short, long, default_value_t = false)]
+    #[arg(short, long, default_value_t = false, env = "OFFLINE_MODE")]
     pub offline: bool,
 
     /// Url to an alternative result tracker, results are POST'ed to the url with a json body
     /// in the format of {"images_found": ["AsDfgHi", "7654321", "1234567", ...]}
     /// Defaults to nicolas17's tracker
-    #[arg(long, verbatim_doc_comment)]
+    #[arg(long, verbatim_doc_comment, env = "TRACKER_URL")]
     pub online_tracker_url: Option<String>,
 
     ///  How many requests to queue per second (actual rate will be slightly lower)
-    #[arg(short, long, default_value_t = 10)]
+    #[arg(short, long, default_value_t = 10, env = "CONCURRENCY")]
     pub concurrent: usize,
     /// Bypass concurrency sanity check
-    #[arg(long, default_value_t = false)]
+    #[arg(long, default_value_t = false, env = "CONCURRENT_UNSAFE")]
     pub concurrent_unsafe: bool,
 }
 
