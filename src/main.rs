@@ -1,5 +1,6 @@
 use clap::crate_version;
 use clap::Parser;
+use human_repr::HumanDuration;
 use prometheus_exporter::prometheus::{register_counter, register_gauge};
 use rand::seq::SliceRandom;
 use reqwest::redirect::Policy;
@@ -418,12 +419,13 @@ async fn main() {
                                         let found = tasks_found.get() as u64;
                                         let elapsed = start.elapsed();
                                         println!(
-                                            "{} req, {} found, {} failed, ~{:.2}% exist, {:.1} rps",
+                                            "{} req, {} found, {} failed, ~{:.2}% exist, {:.1} rps, {}",
                                             worked,
                                             found,
                                             worked - found,
                                             found as f32 / worked as f32 * 100.0,
-                                            worked as f32 / elapsed.as_secs_f32()
+                                            worked as f32 / elapsed.as_secs_f32(),
+                                            elapsed.human_duration()
                                         );
                                     }
                                     break;
@@ -540,12 +542,13 @@ async fn main() {
     let worked = tasks_worked.get() as u64;
     let found = tasks_found.get() as u64;
     println!(
-        "{} req, {} found, {} failed, ~{:.2}% exist, {:.1} rps",
+        "{} req, {} found, {} failed, ~{:.2}% exist, {:.1} rps, {}",
         worked,
         found,
         worked - found,
         found as f32 / worked as f32 * 100.0,
-        worked as f32 / elapsed.as_secs_f32()
+        worked as f32 / elapsed.as_secs_f32(),
+        elapsed.human_duration()
     );
     println!("All done.");
 }
