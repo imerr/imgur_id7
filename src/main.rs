@@ -1,24 +1,29 @@
+use clap::crate_version;
+use clap::Parser;
+use prometheus_exporter::prometheus::{register_counter, register_gauge};
+use rand::seq::SliceRandom;
+use reqwest::redirect::Policy;
+use reqwest::{Client, ClientBuilder, Proxy, StatusCode};
+use serde::Serialize;
 use std::net::SocketAddr;
 use std::process::exit;
 use std::sync::Arc;
 use std::time::{Duration, Instant};
-use clap::Parser;
-use prometheus_exporter::prometheus::{register_counter, register_gauge};
-use reqwest::{Client, ClientBuilder, Proxy, StatusCode};
-use reqwest::redirect::Policy;
 use tokio::fs::{File, OpenOptions};
 use tokio::io::{AsyncBufReadExt, AsyncWriteExt, BufReader, BufWriter};
-use tokio::sync::{mpsc};
-use tokio::{signal, task};
-use tokio::task::{JoinSet};
+use tokio::sync::mpsc;
+use tokio::task::JoinSet;
 use tokio::time::sleep;
-use rand::seq::SliceRandom;
+use tokio::{signal, task};
 use tokio_util::sync::CancellationToken;
-use serde::Serialize;
-use clap::crate_version;
 
 // a-z, A-Z, 0-9
-const CHARS: &[char; 62] = &['a', 'b', 'c', 'd', 'e', 'f', 'g', 'h', 'i', 'j', 'k', 'l', 'm', 'n', 'o', 'p', 'q', 'r', 's', 't', 'u', 'v', 'w', 'x', 'y', 'z', 'A', 'B', 'C', 'D', 'E', 'F', 'G', 'H', 'I', 'J', 'K', 'L', 'M', 'N', 'O', 'P', 'Q', 'R', 'S', 'T', 'U', 'V', 'W', 'X', 'Y', 'Z', '0', '1', '2', '3', '4', '5', '6', '7', '8', '9'];
+const CHARS: &[char; 62] = &[
+    'a', 'b', 'c', 'd', 'e', 'f', 'g', 'h', 'i', 'j', 'k', 'l', 'm', 'n', 'o', 'p', 'q', 'r', 's',
+    't', 'u', 'v', 'w', 'x', 'y', 'z', 'A', 'B', 'C', 'D', 'E', 'F', 'G', 'H', 'I', 'J', 'K', 'L',
+    'M', 'N', 'O', 'P', 'Q', 'R', 'S', 'T', 'U', 'V', 'W', 'X', 'Y', 'Z', '0', '1', '2', '3', '4',
+    '5', '6', '7', '8', '9',
+];
 const ID_LEN: usize = 7; // modern id length, AT already has a list of all working 5char ids
 
 // New safe limit is 40
@@ -69,10 +74,12 @@ impl ResultsFile {
             .write(true)
             .append(true)
             .create(true)
-            .open(path).await {
+            .open(path)
+            .await
+        {
             Ok(filef) => {
                 return ResultsFile {
-                    writer: BufWriter::new(filef)
+                    writer: BufWriter::new(filef),
                 };
             }
             Err(e) => {
@@ -83,7 +90,11 @@ impl ResultsFile {
     }
 
     pub async fn write(&mut self, found: &str) -> bool {
-        match self.writer.write_all(format!("https://i.imgur.com/{}.jpg", found).as_bytes()).await {
+        match self
+            .writer
+            .write_all(format!("https://i.imgur.com/{}.jpg", found).as_bytes())
+            .await
+        {
             Ok(_) => {}
             Err(e) => {
                 println!("Failed to write result to results file: {}", e);
@@ -136,17 +147,28 @@ const TRACKER_SEND_LIMIT: usize = 100;
 impl ResultsTracker {
     pub fn new(url: Option<String>) -> ResultsTracker {
         ResultsTracker {
-            client: ClientBuilder::new().user_agent(format!("imgur_id7/{}", crate_version!())).build().unwrap(),
-            url: url.unwrap_or(String::from("https://data.nicolas17.xyz/imgur-bruteforce/report")),
-            buffer: ResultsTrackerBuffer { images_found: vec![] },
+            client: ClientBuilder::new()
+                .user_agent(format!(
+                    "imgur_id7/{}",
+                    crate_version!()
+                ))
+                .build()
+                .unwrap(),
+            url: url.unwrap_or(String::from(
+                "https://data.nicolas17.xyz/imgur-bruteforce/report",
+            )),
+            buffer: ResultsTrackerBuffer {
+                images_found: vec![],
+            },
             last_send: Instant::now(),
         }
     }
 
     pub async fn report(&mut self, id: String) {
         self.buffer.images_found.push(id);
-        if self.last_send.elapsed() > TRACKER_SEND_INTERVAL ||
-            self.buffer.images_found.len() > TRACKER_SEND_LIMIT {
+        if self.last_send.elapsed() > TRACKER_SEND_INTERVAL
+            || self.buffer.images_found.len() > TRACKER_SEND_LIMIT
+        {
             self.send().await;
         }
     }
@@ -158,12 +180,18 @@ impl ResultsTracker {
                     if !res.status().is_success() {
                         println!("Failed to submit results to the tracker, got non-2oo status {}. Retrying in 2s. Response: {}\n", res.status().as_u16(), res.text().await.unwrap_or(String::from("n/a")));
                     } else {
-                        println!("Reported {} to the tracker.", self.buffer.images_found.len());
+                        println!(
+                            "Reported {} to the tracker.",
+                            self.buffer.images_found.len()
+                        );
                         break;
                     }
                 }
                 Err(e) => {
-                    println!("Failed to submit results to the tracker: {}. Retrying in 2s", e);
+                    println!(
+                        "Failed to submit results to the tracker: {}. Retrying in 2s",
+                        e
+                    );
                 }
             }
             sleep(Duration::from_secs(2)).await;
@@ -205,11 +233,12 @@ async fn main() {
                                 while splits.len() < 4 {
                                     splits.push("");
                                 }
-                                let purl = format!("http://{}:{}@{}:{}/", splits[2], splits[3], splits[0], splits[1]);
+                                let purl = format!(
+                                    "http://{}:{}@{}:{}/",
+                                    splits[2], splits[3], splits[0], splits[1]
+                                );
                                 match Proxy::all(purl.as_str()) {
-                                    Ok(proxy) => {
-                                        proxies.push(proxy)
-                                    }
+                                    Ok(proxy) => proxies.push(proxy),
                                     Err(e) => {
                                         println!("Bad proxy line '{}' -> '{}': {}", line, purl, e);
                                         std::process::exit(1);
@@ -220,7 +249,10 @@ async fn main() {
                             }
                         }
                         Err(e) => {
-                            println!("Failed to read line from proxy file '{}': {}", proxy_list, e);
+                            println!(
+                                "Failed to read line from proxy file '{}': {}",
+                                proxy_list, e
+                            );
                             std::process::exit(1);
                         }
                     }
@@ -240,7 +272,7 @@ async fn main() {
             proxies.push(Proxy::custom(|_| -> Option<&'static str> { None }));
         }
     }
-    //
+
     let (producer, consumer) = async_channel::bounded(args.concurrent + 10);
     let producer = Arc::new(producer);
     let consumer = Arc::new(consumer);
@@ -250,6 +282,7 @@ async fn main() {
         let producer = producer.clone();
         let stopped = stopped.clone();
         let args = args.clone();
+
         tasks.spawn(async move {
             let mut dispatched = 0usize;
             loop {
@@ -270,6 +303,7 @@ async fn main() {
                         return;
                     }
                 };
+
                 dispatched += 1;
                 if dispatched == args.concurrent {
                     dispatched = 0;
@@ -286,12 +320,14 @@ async fn main() {
             producer.close();
         });
     }
+
     let (done_tx, mut done_rx) = mpsc::channel(args.concurrent * 10);
     let done_tx = Arc::new(done_tx);
     let tasks_worked = Arc::new(register_counter!("id7_requests", "Requests sent").unwrap());
     let tasks_found = Arc::new(register_counter!("id7_found", "Found items").unwrap());
     let start = Instant::now();
     let mut worker_counter = 0;
+
     for proxy in proxies {
         let tasks_worked = tasks_worked.clone();
         let tasks_found = tasks_found.clone();
@@ -299,6 +335,7 @@ async fn main() {
         let done_tx = done_tx.clone();
         let stopped = stopped.clone();
         let args = args.clone();
+
         worker_counter += 1;
         let worker_i = worker_counter;
         tasks.spawn(async move {
@@ -312,10 +349,12 @@ async fn main() {
                 .timeout(Duration::from_secs(10))
                 .redirect(Policy::none())
                 .build();
+
             if client.is_err() {
                 println!("Failed to build http client: {}", client.unwrap_err());
                 return;
             }
+
             let client = client.unwrap();
             loop {
                 match consumer.recv().await {
@@ -378,7 +417,14 @@ async fn main() {
                                     if worked % args.concurrent as u64 == 0 {
                                         let found = tasks_found.get() as u64;
                                         let elapsed = start.elapsed();
-                                        println!("{} req, {} found, {} failed, ~{:.2}% exist, {:.1} rps", worked, found, worked - found, found as f32 / worked as f32 * 100.0, worked as f32 / elapsed.as_secs_f32());
+                                        println!(
+                                            "{} req, {} found, {} failed, ~{:.2}% exist, {:.1} rps",
+                                            worked,
+                                            found,
+                                            worked - found,
+                                            found as f32 / worked as f32 * 100.0,
+                                            worked as f32 / elapsed.as_secs_f32()
+                                        );
                                     }
                                     break;
                                 }
@@ -412,17 +458,22 @@ async fn main() {
             }
         });
     }
+
     drop(done_tx);
+
+    // Start prometheus exporter
     let concur_met = register_gauge!("id7_concurrency", "Request concurrency").unwrap();
     concur_met.set(args.concurrent as f64);
     if let Some(prometheus_addr) = args.prometheus_addr {
         prometheus_exporter::start(prometheus_addr).expect("Cannot start prometheus exporter!");
     }
+
     let result_task = task::spawn(async move {
         let mut result_file = None;
         if let Some(out_file) = &args.results_file {
             result_file = Some(ResultsFile::open(out_file.as_str()).await);
         }
+
         let mut result_tracker = None;
         if !args.offline {
             result_tracker = Some(ResultsTracker::new(args.online_tracker_url.clone()));
@@ -432,6 +483,7 @@ async fn main() {
             println!("No result output mechanism selected.\nEither writing to file or sending to tracker need to be enabled!");
             exit(1);
         }
+
         loop {
             if let Some(found) = done_rx.recv().await {
                 if let Some(file) = result_file.as_mut() {
@@ -454,6 +506,7 @@ async fn main() {
             }
         }
     });
+
     println!("Running, press ctrl+c to cancel");
     match signal::ctrl_c().await {
         Ok(()) => {
@@ -465,6 +518,7 @@ async fn main() {
             // we also shut down in case of error
         }
     }
+
     while let Some(res) = tasks.join_next().await {
         match res {
             Ok(_) => {}
@@ -473,6 +527,7 @@ async fn main() {
             }
         }
     }
+
     println!("Producer/Workers finished. Waiting for result writer now..");
     match result_task.await {
         Ok(_) => {}
@@ -480,9 +535,17 @@ async fn main() {
             println!("Failed to join result task: {}", e)
         }
     }
+
     let elapsed = start.elapsed();
     let worked = tasks_worked.get() as u64;
     let found = tasks_found.get() as u64;
-    println!("{} req, {} found, {} failed, ~{:.2}% exist, {:.1} rps", worked, found, worked - found, found as f32 / worked as f32 * 100.0, worked as f32 / elapsed.as_secs_f32());
+    println!(
+        "{} req, {} found, {} failed, ~{:.2}% exist, {:.1} rps",
+        worked,
+        found,
+        worked - found,
+        found as f32 / worked as f32 * 100.0,
+        worked as f32 / elapsed.as_secs_f32()
+    );
     println!("All done.");
 }
