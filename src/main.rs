@@ -1,8 +1,9 @@
+use std::net::SocketAddr;
 use std::process::exit;
 use std::sync::Arc;
 use std::time::{Duration, Instant};
-use atomic_counter::{AtomicCounter, RelaxedCounter};
 use clap::Parser;
+use prometheus_exporter::prometheus::{register_counter, register_gauge};
 use reqwest::{Client, ClientBuilder, Proxy, StatusCode};
 use reqwest::redirect::Policy;
 use tokio::fs::{File, OpenOptions};
@@ -45,6 +46,10 @@ struct Args {
     /// Defaults to nicolas17's tracker
     #[arg(long, verbatim_doc_comment, env = "TRACKER_URL")]
     pub online_tracker_url: Option<String>,
+
+    /// Binding address for Prometheus exporter
+    #[arg(long, default_value = "0.0.0.0:46484", env = "PROM_ADDR")]
+    pub prometheus_addr: SocketAddr,
 
     ///  How many requests to queue per second (actual rate will be slightly lower)
     #[arg(short, long, default_value_t = 10, env = "CONCURRENCY")]
@@ -283,15 +288,13 @@ async fn main() {
     }
     let (done_tx, mut done_rx) = mpsc::channel(args.concurrent * 10);
     let done_tx = Arc::new(done_tx);
-    let tasks_worked = Arc::new(RelaxedCounter::new(0));
-    let tasks_found = Arc::new(RelaxedCounter::new(0));
-    let tasks_failed = Arc::new(RelaxedCounter::new(0));
+    let tasks_worked = Arc::new(register_counter!("id7_requests", "Requests sent").unwrap());
+    let tasks_found = Arc::new(register_counter!("id7_found", "Found items").unwrap());
     let start = Instant::now();
     let mut worker_counter = 0;
     for proxy in proxies {
         let tasks_worked = tasks_worked.clone();
         let tasks_found = tasks_found.clone();
-        let tasks_failed = tasks_failed.clone();
         let consumer = consumer.clone();
         let done_tx = done_tx.clone();
         let stopped = stopped.clone();
@@ -326,8 +329,7 @@ async fn main() {
                                 .send()
                                 .await {
                                 Ok(res) => {
-                                    //println!("{}: {}", url, res.status());
-                                    let worked = tasks_worked.inc() + 1;
+                                    tasks_worked.inc();
                                     if res.status().is_success() {
                                         // imgur now returns 200 for removed images too, but with the "removed.png" as a body
                                         // thankfully it has a consistent length & etag
@@ -336,7 +338,6 @@ async fn main() {
                                             if length == "503" {
                                                 if let Some(etag) = res.headers().get("etag") {
                                                     if etag == "\"d835884373f4d6c8f24742ceabe74946\"" {
-                                                        tasks_failed.inc();
                                                         bad = true;
                                                     }
                                                 }
@@ -372,13 +373,12 @@ async fn main() {
                                             }
                                             continue;
                                         }
-                                        tasks_failed.inc();
                                     }
-                                    if worked % args.concurrent == 0 {
-                                        let found = tasks_found.get();
-                                        let failed = tasks_failed.get();
+                                    let worked = tasks_worked.get() as u64;
+                                    if worked % args.concurrent as u64 == 0 {
+                                        let found = tasks_found.get() as u64;
                                         let elapsed = start.elapsed();
-                                        println!("{} req, {} found, {} failed, ~{:.2}% exist, {:.1} rps", worked, found, failed, found as f32 / worked as f32 * 100.0, worked as f32 / elapsed.as_secs_f32());
+                                        println!("{} req, {} found, {} failed, ~{:.2}% exist, {:.1} rps", worked, found, worked - found, found as f32 / worked as f32 * 100.0, worked as f32 / elapsed.as_secs_f32());
                                     }
                                     break;
                                 }
@@ -413,6 +413,9 @@ async fn main() {
         });
     }
     drop(done_tx);
+    let concur_met = register_gauge!("id7_concurrency", "Request concurrency").unwrap();
+    concur_met.set(args.concurrent as f64);
+    prometheus_exporter::start(args.prometheus_addr).expect("Cannot start prometheus exporter!");
     let result_task = task::spawn(async move {
         let mut result_file = None;
         if let Some(out_file) = &args.results_file {
@@ -476,9 +479,8 @@ async fn main() {
         }
     }
     let elapsed = start.elapsed();
-    let worked = tasks_worked.get();
-    let found = tasks_found.get();
-    let failed = tasks_failed.get();
-    println!("{} req, {} found, {} failed, ~{:.2}% exist, {:.1} rps", worked, found, failed, found as f32 / worked as f32 * 100.0, worked as f32 / elapsed.as_secs_f32());
+    let worked = tasks_worked.get() as u64;
+    let found = tasks_found.get() as u64;
+    println!("{} req, {} found, {} failed, ~{:.2}% exist, {:.1} rps", worked, found, worked - found, found as f32 / worked as f32 * 100.0, worked as f32 / elapsed.as_secs_f32());
     println!("All done.");
 }
