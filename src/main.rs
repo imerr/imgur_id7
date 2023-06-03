@@ -1,21 +1,22 @@
+use std::net::SocketAddr;
+use std::process::exit;
+use std::sync::Arc;
+use std::time::{Duration, Instant};
+
 use clap::crate_version;
 use clap::Parser;
 use human_repr::HumanDuration;
 use prometheus_exporter::prometheus::{register_counter, register_gauge};
 use rand::seq::SliceRandom;
-use reqwest::redirect::Policy;
 use reqwest::{Client, ClientBuilder, Proxy, StatusCode};
+use reqwest::redirect::Policy;
 use serde::Serialize;
-use std::net::SocketAddr;
-use std::process::exit;
-use std::sync::Arc;
-use std::time::{Duration, Instant};
+use tokio::{signal, task};
 use tokio::fs::{File, OpenOptions};
 use tokio::io::{AsyncBufReadExt, AsyncWriteExt, BufReader, BufWriter};
 use tokio::sync::mpsc;
 use tokio::task::JoinSet;
 use tokio::time::sleep;
-use tokio::{signal, task};
 use tokio_util::sync::CancellationToken;
 
 // a-z, A-Z, 0-9
