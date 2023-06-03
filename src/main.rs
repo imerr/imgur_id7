@@ -47,9 +47,9 @@ struct Args {
     #[arg(long, verbatim_doc_comment, env = "TRACKER_URL")]
     pub online_tracker_url: Option<String>,
 
-    /// Binding address for Prometheus exporter
-    #[arg(long, default_value = "0.0.0.0:46484", env = "PROM_ADDR")]
-    pub prometheus_addr: SocketAddr,
+    /// Binding address for optional Prometheus exporter
+    #[arg(long, env = "PROM_ADDR")]
+    pub prometheus_addr: Option<SocketAddr>,
 
     ///  How many requests to queue per second (actual rate will be slightly lower)
     #[arg(short, long, default_value_t = 10, env = "CONCURRENCY")]
@@ -415,7 +415,9 @@ async fn main() {
     drop(done_tx);
     let concur_met = register_gauge!("id7_concurrency", "Request concurrency").unwrap();
     concur_met.set(args.concurrent as f64);
-    prometheus_exporter::start(args.prometheus_addr).expect("Cannot start prometheus exporter!");
+    if let Some(prometheus_addr) = args.prometheus_addr {
+        prometheus_exporter::start(prometheus_addr).expect("Cannot start prometheus exporter!");
+    }
     let result_task = task::spawn(async move {
         let mut result_file = None;
         if let Some(out_file) = &args.results_file {
